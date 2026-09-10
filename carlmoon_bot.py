@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 import uuid
 from datetime import datetime
@@ -139,20 +139,24 @@ async def amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def creategroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal_id = context.user_data.get("current_deal")
-    deal_info = f"\nDeal ID: `{deal_id}`" if deal_id else ""
+    if not deal_id:
+        deal_id = str(uuid.uuid4())[:5].upper()
+
+    group_name = f"Carl Moon Escrow #{deal_id.upper()}"
 
     text = (
-        f"👥 *Create Private Escrow Group*{deal_info}\n\n"
-        f"Please follow these steps carefully:\n\n"
-        f"1. Create a new *Private Group* on Telegram\n"
-        f"2. Add this bot to the group\n"
-        f"3. Add the Admin: {ADMIN_USERNAME}\n"
-        f"4. Add the other party (Buyer or Seller)\n"
-        f"5. Make the bot and Admin as group admins (recommended)\n"
-        f"6. Share the group invite link here or with the other party\n\n"
-        f"This group will be used for all communication related to this deal."
+        f"💬 *Escrow Group Created*\n\n"
+        f"*Group Name:* {group_name}\n\n"
+        f"*Creator:* {ADMIN_USERNAME}\n\n"
+        f"Join this escrow group and share the link with the buyer/seller.\n\n"
+        f"⚠️ *Note:* This group is for 2 members only — third parties are not allowed to join."
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤝 Join Group (Click Me)", url="https://t.me/Vcare524")]
+    ])
+
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def description(update: Update, context: ContextTypes.DEFAULT_TYPE):
