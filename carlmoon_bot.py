@@ -37,19 +37,30 @@ def get_status_emoji(status):
     return emojis.get(status, "📄")
 
 
+def get_reply_func(update: Update):
+    """Returns a function to reply, works for both messages and callbacks."""
+    if update.message:
+        return update.message.reply_text
+    elif update.callback_query and update.callback_query.message:
+        return update.callback_query.message.reply_text
+    return None
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🆕 New Deal", callback_data="newdeal")],
         [InlineKeyboardButton("📖 Guide", callback_data="guide")],
         [InlineKeyboardButton("💬 Support", callback_data="support")]
     ])
-    await update.message.reply_text(
-        "🌙 *Welcome to Carl Moon Escrow Services*\n\n"
-        "Secure Manual Escrow with *5% commission*.\n\n"
-        "Use the buttons below or type /help for all commands.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    reply = get_reply_func(update)
+    if reply:
+        await reply(
+            "🌙 *Welcome to Carl Moon Escrow Services*\n\n"
+            "Secure Manual Escrow with *5% commission*.\n\n"
+            "Use the buttons below or type /help for all commands.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,7 +97,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/admin_release – Force release\n"
         "/admin_refund – Force refund"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    reply = get_reply_func(update)
+    if reply:
+        await reply(text, parse_mode="Markdown")
 
 
 async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,7 +123,9 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Admin:*\n"
         "Checks payment and uses /admin_release or /admin_refund"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    reply = get_reply_func(update)
+    if reply:
+        await reply(text, parse_mode="Markdown")
 
 
 async def newdeal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146,15 +161,17 @@ async def newdeal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 Deal Info", callback_data="dealinfo")]
     ])
 
-    await update.message.reply_text(
-        f"✅ *New escrow deal created!*\n\n"
-        f"Deal ID: `{deal_id}`\n"
-        f"Status: {get_status_emoji('created')} Created\n"
-        f"Commission: 5%\n\n"
-        f"Choose your role or set amount:",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    reply = get_reply_func(update)
+    if reply:
+        await reply(
+            f"✅ *New escrow deal created!*\n\n"
+            f"Deal ID: `{deal_id}`\n"
+            f"Status: {get_status_emoji('created')} Created\n"
+            f"Commission: 5%\n\n"
+            f"Choose your role or set amount:",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
 
 
 async def amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -292,7 +309,9 @@ async def dealinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✅ Confirm", callback_data="confirm_deal")],
         [InlineKeyboardButton("💸 Release to Seller", callback_data="release_prompt")]
     ])
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    reply = get_reply_func(update)
+    if reply:
+        await reply(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -558,7 +577,9 @@ async def rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"For support contact the owner: {ADMIN_USERNAME}")
+    reply = get_reply_func(update)
+    if reply:
+        await reply(f"For support contact the owner: {ADMIN_USERNAME}")
 
 
 async def admin_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -590,7 +611,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
-    user_id = query.from_user.id
 
     if data == "newdeal":
         await newdeal(update, context)
@@ -603,14 +623,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "role_buyer":
         deal_id = context.user_data.get("current_deal")
         if deal_id and deal_id in deals:
-            deals[deal_id]["buyer"] = user_id
+            deals[deal_id]["buyer"] = query.from_user.id
             await query.message.reply_text("✅ You are now set as the Buyer. Use /buyer YOUR_WALLET to set your address.")
         else:
             await query.message.reply_text("No active deal.")
     elif data == "role_seller":
         deal_id = context.user_data.get("current_deal")
         if deal_id and deal_id in deals:
-            deals[deal_id]["seller"] = user_id
+            deals[deal_id]["seller"] = query.from_user.id
             await query.message.reply_text("✅ You are now set as the Seller. Use /seller YOUR_WALLET to set your address.")
         else:
             await query.message.reply_text("No active deal.")
