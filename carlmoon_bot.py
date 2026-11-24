@@ -1,5 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import uuid
 from datetime import datetime
 import os
@@ -22,18 +22,33 @@ def is_admin(user_id):
     return user_id == ADMIN_ID
 
 
+def get_status_emoji(status):
+    emojis = {
+        "created": "🆕",
+        "locked": "🔒",
+        "paid": "💰",
+        "released_to_seller": "💸",
+        "refunded_to_buyer": "↩️",
+        "disputed": "⚠️",
+        "cancelled": "❌",
+        "admin_released": "✅",
+        "admin_refunded": "🔄"
+    }
+    return emojis.get(status, "📄")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🆕 New Deal", callback_data="newdeal")],
+        [InlineKeyboardButton("📖 Guide", callback_data="guide")],
+        [InlineKeyboardButton("💬 Support", callback_data="support")]
+    ])
     await update.message.reply_text(
         "🌙 *Welcome to Carl Moon Escrow Services*\n\n"
         "Secure Manual Escrow with *5% commission*.\n\n"
-        "📌 *How it works:*\n"
-        "1. /newdeal – Create a deal\n"
-        "2. /amount 100 – Set amount\n"
-        "3. Bot shows escrow wallets\n"
-        "4. /creategroup – Create private group with Admin\n"
-        "5. Buyer sends crypto → Admin releases\n\n"
-        "Type /help for all commands or /guide for step-by-step.",
-        parse_mode="Markdown"
+        "Use the buttons below or type /help for all commands.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
 
 
@@ -46,20 +61,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/seller – Set seller wallet\n"
         "/buyer – Set buyer wallet\n"
         "/confirm – Confirm the deal\n"
-        "/creategroup – Create private group with Admin\n"
+        "/creategroup – Create group with Admin\n"
         "/status – View deal details\n"
         "/mydeals – Your deals\n"
         "/pay_seller – Release to seller\n"
         "/pay_seller 50 – Partial release\n"
         "/refund_buyer – Refund to buyer\n"
+        "/paid – Buyer marks payment sent\n"
         "/dispute – Open dispute\n"
         "/cancel – Cancel deal\n"
         "/terms – Show terms\n"
         "/buyerterms – Set buyer terms\n"
         "/sellerterms – Set seller terms\n"
         "/dealinfo – Full deal summary\n"
-        "/whoami – Your role in the deal\n"
-        "/balance – Show deal amount & fee\n"
+        "/whoami – Your role\n"
+        "/balance – Show deal amount\n"
         "/guide – Step-by-step guide\n"
         "/support – Support\n"
         "/whatisescrow – How it works\n"
@@ -79,17 +95,17 @@ async def guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Buyer:*\n"
         "1. /newdeal\n"
         "2. /amount 100\n"
-        "3. /buyer YOUR_WALLET\n"
+        "3. Tap *I am Buyer* or use /buyer\n"
         "4. /buyerterms Your terms\n"
         "5. /confirm\n"
-        "6. Send crypto to the address shown\n"
+        "6. Send crypto → then /paid\n"
         "7. Wait for release\n\n"
         "*Seller:*\n"
         "1. Join the deal\n"
-        "2. /seller YOUR_WALLET\n"
+        "2. Tap *I am Seller* or use /seller\n"
         "3. /sellerterms Your terms\n"
         "4. /confirm\n"
-        "5. Deliver the product/service\n"
+        "5. Deliver product/service\n"
         "6. Receive payment after release\n\n"
         "*Admin:*\n"
         "Checks payment and uses /admin_release or /admin_refund"
@@ -108,31 +124,36 @@ async def newdeal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "buyer_address": None,
         "seller_address": None,
         "amount": 0,
+        "released_amount": 0,
         "description": "No description yet",
         "buyer_terms": "Not set",
         "seller_terms": "Not set",
         "status": "created",
         "buyer_confirmed": False,
         "seller_confirmed": False,
+        "buyer_paid": False,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "fee_percent": 5
     }
 
     context.user_data["current_deal"] = deal_id
 
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👤 I am Buyer", callback_data="role_buyer"),
+         InlineKeyboardButton("👤 I am Seller", callback_data="role_seller")],
+        [InlineKeyboardButton("💰 Set Amount", callback_data="set_amount_prompt")],
+        [InlineKeyboardButton("📝 Add Description", callback_data="set_desc_prompt")],
+        [InlineKeyboardButton("📊 Deal Info", callback_data="dealinfo")]
+    ])
+
     await update.message.reply_text(
         f"✅ *New escrow deal created!*\n\n"
         f"Deal ID: `{deal_id}`\n"
-        f"Status: Created 🔒\n"
+        f"Status: {get_status_emoji('created')} Created\n"
         f"Commission: 5%\n\n"
-        f"*Next Steps:*\n"
-        f"1. /amount 100\n"
-        f"2. /description details\n"
-        f"3. /buyer or /seller\n"
-        f"4. /buyerterms or /sellerterms\n"
-        f"5. /creategroup\n"
-        f"6. Both parties /confirm",
-        parse_mode="Markdown"
+        f"Choose your role or set amount:",
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
 
 
@@ -155,6 +176,11 @@ async def amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fee = value * 0.05
     net = value - fee
 
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 I Paid", callback_data="mark_paid")],
+        [InlineKeyboardButton("📊 Deal Info", callback_data="dealinfo")]
+    ])
+
     text = (
         f"✅ *Amount set successfully!*\n\n"
         f"Deal Amount: *{value}*\n"
@@ -167,10 +193,9 @@ async def amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"*ETH / BEP20:*\n`{ETH_BEP20}`\n\n"
         f"*LTC:*\n`{LTC_ADDRESS}`\n\n"
         f"────────────────────\n"
-        f"After sending, notify the admin.\n"
-        f"Also use /creategroup to make a private group."
+        f"After sending, tap *I Paid* or notify the admin."
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,16 +206,20 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     deal = deals[deal_id]
     amount = deal.get("amount", 0)
+    released = deal.get("released_amount", 0)
     fee = amount * 0.05
     net = amount - fee
+    remaining = amount - released
 
     text = (
         f"*Current Deal Balance*\n\n"
         f"Deal ID: `{deal_id}`\n"
-        f"Amount: *{amount}*\n"
+        f"Total Amount: *{amount}*\n"
         f"5% Fee: *{fee:.2f}*\n"
         f"Seller receives: *{net:.2f}*\n"
-        f"Status: *{deal['status']}*\n\n"
+        f"Already released: *{released}*\n"
+        f"Remaining: *{remaining}*\n"
+        f"Status: {get_status_emoji(deal['status'])} {deal['status']}\n\n"
         f"Note: This is the deal amount only.\n"
         f"Real crypto balance must be checked on blockchain."
     )
@@ -246,17 +275,24 @@ async def dealinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"*Deal Info*\n\n"
         f"ID: `{deal_id}`\n"
-        f"Status: *{deal['status']}*\n"
+        f"Status: {get_status_emoji(deal['status'])} *{deal['status']}*\n"
         f"Amount: {deal['amount']}\n"
+        f"Released: {deal.get('released_amount', 0)}\n"
         f"5% Fee: {fee:.2f}\n"
         f"Seller receives: {net:.2f}\n"
         f"Description: {deal['description']}\n"
         f"Buyer terms: {deal.get('buyer_terms', 'Not set')}\n"
         f"Seller terms: {deal.get('seller_terms', 'Not set')}\n"
         f"Buyer confirmed: {'Yes' if deal['buyer_confirmed'] else 'No'}\n"
-        f"Seller confirmed: {'Yes' if deal['seller_confirmed'] else 'No'}"
+        f"Seller confirmed: {'Yes' if deal['seller_confirmed'] else 'No'}\n"
+        f"Buyer paid: {'Yes' if deal.get('buyer_paid') else 'No'}"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 I Paid", callback_data="mark_paid")],
+        [InlineKeyboardButton("✅ Confirm", callback_data="confirm_deal")],
+        [InlineKeyboardButton("💸 Release to Seller", callback_data="release_prompt")]
+    ])
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -360,6 +396,16 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔒 Both parties confirmed. Deal is now locked.")
 
 
+async def paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    deal_id = context.user_data.get("current_deal")
+    if not deal_id or deal_id not in deals:
+        await update.message.reply_text("No active deal.")
+        return
+    deals[deal_id]["buyer_paid"] = True
+    deals[deal_id]["status"] = "paid"
+    await update.message.reply_text("💰 Buyer marked payment as sent. Admin will verify on blockchain.")
+
+
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal_id = context.user_data.get("current_deal")
     if not deal_id or deal_id not in deals:
@@ -371,13 +417,15 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"*Deal Status*\n\n"
         f"ID: `{deal_id}`\n"
-        f"Status: *{deal['status']}*\n"
+        f"Status: {get_status_emoji(deal['status'])} *{deal['status']}*\n"
         f"Description: {deal['description']}\n"
         f"Amount: {deal['amount']}\n"
+        f"Released: {deal.get('released_amount', 0)}\n"
         f"5% Fee: {fee:.2f}\n"
         f"Seller receives: {net:.2f}\n"
         f"Buyer confirmed: {'Yes' if deal['buyer_confirmed'] else 'No'}\n"
         f"Seller confirmed: {'Yes' if deal['seller_confirmed'] else 'No'}\n"
+        f"Buyer paid: {'Yes' if deal.get('buyer_paid') else 'No'}\n"
         f"Created: {deal['created_at']}"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
@@ -389,7 +437,7 @@ async def mydeals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     found = False
     for deal_id, deal in deals.items():
         if deal["creator"] == user_id or deal["buyer"] == user_id or deal["seller"] == user_id:
-            text += f"• `{deal_id}` – {deal['status']} – {deal['description'][:30]}\n"
+            text += f"• `{deal_id}` – {get_status_emoji(deal['status'])} {deal['status']} – {deal['description'][:30]}\n"
             found = True
     if not found:
         text = "You have no deals yet."
@@ -405,7 +453,7 @@ async def alldeals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     text = "*All Deals (Admin View):*\n\n"
     for deal_id, deal in deals.items():
-        text += f"• `{deal_id}` | {deal['status']} | {deal['amount']} | {deal['description'][:25]}\n"
+        text += f"• `{deal_id}` | {get_status_emoji(deal['status'])} {deal['status']} | {deal['amount']} | {deal['description'][:25]}\n"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
@@ -414,8 +462,36 @@ async def pay_seller(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not deal_id or deal_id not in deals:
         await update.message.reply_text("No active deal.")
         return
-    deals[deal_id]["status"] = "released_to_seller"
-    await update.message.reply_text("✅ Payment marked as released to seller.")
+
+    deal = deals[deal_id]
+    user_id = update.effective_user.id
+
+    if user_id != deal["creator"] and not is_admin(user_id):
+        await update.message.reply_text("Only the deal creator or admin can release payment.")
+        return
+
+    if context.args:
+        try:
+            amount_to_release = float(context.args[0])
+        except:
+            await update.message.reply_text("Invalid amount. Example: /pay_seller 50")
+            return
+    else:
+        amount_to_release = deal["amount"] - deal.get("released_amount", 0)
+
+    if amount_to_release <= 0:
+        await update.message.reply_text("Nothing left to release.")
+        return
+
+    remaining = deal["amount"] - deal.get("released_amount", 0)
+    if amount_to_release > remaining:
+        await update.message.reply_text(f"Cannot release more than remaining amount ({remaining}).")
+        return
+
+    deal["released_amount"] = deal.get("released_amount", 0) + amount_to_release
+    if deal["released_amount"] >= deal["amount"]:
+        deal["status"] = "released_to_seller"
+    await update.message.reply_text(f"✅ Released *{amount_to_release}* to seller.\nTotal released: {deal['released_amount']}", parse_mode="Markdown")
 
 
 async def refund_buyer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -494,6 +570,7 @@ async def admin_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No active deal.")
         return
     deals[deal_id]["status"] = "admin_released"
+    deals[deal_id]["released_amount"] = deals[deal_id]["amount"]
     await update.message.reply_text("✅ Admin marked the deal as released to seller.")
 
 
@@ -507,6 +584,52 @@ async def admin_refund(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     deals[deal_id]["status"] = "admin_refunded"
     await update.message.reply_text("✅ Admin marked the deal as refunded to buyer.")
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = query.from_user.id
+
+    if data == "newdeal":
+        await newdeal(update, context)
+    elif data == "guide":
+        await guide(update, context)
+    elif data == "support":
+        await support(update, context)
+    elif data == "dealinfo":
+        await dealinfo(update, context)
+    elif data == "role_buyer":
+        deal_id = context.user_data.get("current_deal")
+        if deal_id and deal_id in deals:
+            deals[deal_id]["buyer"] = user_id
+            await query.message.reply_text("✅ You are now set as the Buyer. Use /buyer YOUR_WALLET to set your address.")
+        else:
+            await query.message.reply_text("No active deal.")
+    elif data == "role_seller":
+        deal_id = context.user_data.get("current_deal")
+        if deal_id and deal_id in deals:
+            deals[deal_id]["seller"] = user_id
+            await query.message.reply_text("✅ You are now set as the Seller. Use /seller YOUR_WALLET to set your address.")
+        else:
+            await query.message.reply_text("No active deal.")
+    elif data == "mark_paid":
+        deal_id = context.user_data.get("current_deal")
+        if deal_id and deal_id in deals:
+            deals[deal_id]["buyer_paid"] = True
+            deals[deal_id]["status"] = "paid"
+            await query.message.reply_text("💰 Payment marked as sent. Admin will verify.")
+        else:
+            await query.message.reply_text("No active deal.")
+    elif data == "confirm_deal":
+        await confirm(update, context)
+    elif data == "set_amount_prompt":
+        await query.message.reply_text("Type: /amount 100")
+    elif data == "set_desc_prompt":
+        await query.message.reply_text("Type: /description Your product details")
+    elif data == "release_prompt":
+        await query.message.reply_text("Type /pay_seller to release full amount\nor /pay_seller 50 for partial release.")
 
 
 def main():
@@ -536,6 +659,7 @@ def main():
     app.add_handler(CommandHandler("seller", seller))
     app.add_handler(CommandHandler("buyer", buyer))
     app.add_handler(CommandHandler("confirm", confirm))
+    app.add_handler(CommandHandler("paid", paid))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("mydeals", mydeals))
     app.add_handler(CommandHandler("alldeals", alldeals))
@@ -549,6 +673,7 @@ def main():
     app.add_handler(CommandHandler("support", support))
     app.add_handler(CommandHandler("admin_release", admin_release))
     app.add_handler(CommandHandler("admin_refund", admin_refund))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
     print("Carl Moon Escrow Bot is now active...")
     app.run_polling()
